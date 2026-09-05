@@ -1,6 +1,6 @@
 # java-cli-arg-parser
 
-[![CI](https://github.com/kasapdev/java-cli-arg-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/kasapdev/java-cli-arg-parser/actions/workflows/ci.yml)
+[![CI](https://github.com/kasapdev/java-cli-arg-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/kasapdev/java-cli-arg-parser/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Java](https://img.shields.io/badge/Java-17-ED8B00?logo=openjdk&logoColor=white)
 
 A lightweight, zero-dependency command-line argument parser for Java. Supports boolean
 flags, value-taking options (`--opt=value` or `--opt value`), short aliases (`-v` for
