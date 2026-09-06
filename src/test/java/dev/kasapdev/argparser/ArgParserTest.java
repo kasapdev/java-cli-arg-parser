@@ -18,8 +18,66 @@ public final class ArgParserTest {
         testEndOfOptionsMarkerTreatsRestAsPositional();
         testHelpTextListsAllRegisteredOptions();
         testDuplicateRegistrationRejected();
+        testUnregisteredNameReturnsFalseOrNull();
+        testNullDefaultValueResolvesToNullWhenOmitted();
+        testDuplicateShortAliasRejected();
+        testShortFlagRejectsInlineValue();
+        testShortAliasOptionMissingValueThrows();
+        testLoneDashIsTreatedAsPositional();
 
         TestKit.finish();
+    }
+
+    private static void testUnregisteredNameReturnsFalseOrNull() {
+        ArgParser parser = buildStandardParser();
+        ParsedArgs parsed = parser.parse(new String[]{});
+        TestKit.check("flag() for a never-registered name returns false", !parsed.flag("nonexistent-flag"));
+        TestKit.check("option() for a never-registered name returns null", parsed.option("nonexistent-option") == null);
+    }
+
+    private static void testNullDefaultValueResolvesToNullWhenOmitted() {
+        ArgParser parser = new ArgParser().addOption("tag", "An optional tag", null);
+        ParsedArgs parsed = parser.parse(new String[]{});
+        TestKit.check("an option with a null default resolves to null (not the string \"null\") when omitted", parsed.option("tag") == null);
+    }
+
+    private static void testDuplicateShortAliasRejected() {
+        ArgParser parser = new ArgParser().addFlag("verbose", "v", "desc");
+        boolean threw = false;
+        try {
+            parser.addOption("value", "v", "a different option reusing -v", "default");
+        } catch (IllegalArgumentException e) {
+            threw = true;
+        }
+        TestKit.check("registering a short alias already claimed by another option is rejected", threw);
+    }
+
+    private static void testShortFlagRejectsInlineValue() {
+        ArgParser parser = buildStandardParser();
+        boolean threw = false;
+        try {
+            parser.parse(new String[]{"-v=true"});
+        } catch (ArgParseException e) {
+            threw = true;
+        }
+        TestKit.check("a short flag with an inline '=' value throws ArgParseException, mirroring the long-flag case", threw);
+    }
+
+    private static void testShortAliasOptionMissingValueThrows() {
+        ArgParser parser = buildStandardParser();
+        boolean threw = false;
+        try {
+            parser.parse(new String[]{"-o"});
+        } catch (ArgParseException e) {
+            threw = true;
+        }
+        TestKit.check("a short-alias option missing its value at end of args throws ArgParseException", threw);
+    }
+
+    private static void testLoneDashIsTreatedAsPositional() {
+        ArgParser parser = buildStandardParser();
+        ParsedArgs parsed = parser.parse(new String[]{"-"});
+        TestKit.check("a lone '-' token is treated as a positional argument, not an unknown flag", parsed.positionals().equals(List.of("-")));
     }
 
     private static ArgParser buildStandardParser() {
