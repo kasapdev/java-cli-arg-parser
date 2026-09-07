@@ -24,6 +24,10 @@ public final class ArgParserTest {
         testShortFlagRejectsInlineValue();
         testShortAliasOptionMissingValueThrows();
         testLoneDashIsTreatedAsPositional();
+        testSubcommandDispatchesToItsOwnParser();
+        testSubcommandsWithOverlappingOptionNamesDoNotCrossContaminate();
+        testUnknownSubcommandThrows();
+        testTopLevelParserWithoutSubcommandsIsUnaffected();
 
         TestKit.finish();
     }
@@ -205,5 +209,91 @@ public final class ArgParserTest {
             threw = true;
         }
         TestKit.check("registering the same option name twice is rejected", threw);
+    }
+
+    /**
+     * Builds a top-level parser with two subcommands, "deploy" and "status", that both
+     * register a "--port" option under the same name but with a different shape:
+     * "deploy" registers it as a value-taking option (a target port number, e.g.
+     * "--port=9090"), while "status" registers it as a boolean flag (e.g. "--port" to
+     * include port info, no value). This lets tests prove the two subcommand parsers are
+     * fully independent instances that never share registration state.
+     */
+    private static ArgParser buildDeployStatusParser() {
+        ArgParser parser = new ArgParser();
+        parser.subcommand("deploy")
+                .addOption("env", "e", "Target environment", "staging")
+                .addOption("port", "p", "Target port to deploy to", "8080")
+                .addFlag("force", "f", "Skip the confirmation prompt");
+        parser.subcommand("status")
+                .addFlag("port", "Include port information in the status output")
+                .addFlag("verbose", "v", "Verbose status output");
+        return parser;
+    }
+
+    private static void testSubcommandDispatchesToItsOwnParser() {
+        ArgParser parser = buildDeployStatusParser();
+        ParsedArgs parsed = parser.parse(new String[]{"deploy", "--env=prod", "--force"});
+
+        TestKit.check("subcommandName() reports the invoked subcommand", "deploy".equals(parsed.subcommandName()));
+        TestKit.check("subcommand() exposes the subcommand's own parsed result", parsed.subcommand() != null);
+        TestKit.check("subcommand's env option parses from its own registration", parsed.subcommand().option("env").equals("prod"));
+        TestKit.check("subcommand's force flag parses from its own registration", parsed.subcommand().flag("force"));
+        TestKit.check("subcommand's port option falls back to its own default", parsed.subcommand().option("port").equals("8080"));
+        TestKit.check("the outer (top-level) result has no positionals of its own", parsed.positionals().isEmpty());
+    }
+
+    private static void testSubcommandsWithOverlappingOptionNamesDoNotCrossContaminate() {
+        ArgParser deployParser = buildDeployStatusParser();
+        ParsedArgs deployed = deployParser.parse(new String[]{"deploy", "--port=9090"});
+        TestKit.check("deploy's --port is resolved as a value-taking option", deployed.subcommand().option("port").equals("9090"));
+        TestKit.check("deploy's --port is not registered as a flag", !deployed.subcommand().flag("port"));
+
+        ArgParser statusParser = buildDeployStatusParser();
+        ParsedArgs status = statusParser.parse(new String[]{"status", "--port"});
+        TestKit.check("status's --port is resolved as a boolean flag", status.subcommand().flag("port"));
+        TestKit.check("status's --port has no option value (it was never registered as an option)", status.subcommand().option("port") == null);
+
+        boolean deployPortRequiresValue = false;
+        try {
+            buildDeployStatusParser().parse(new String[]{"deploy", "--port"});
+        } catch (ArgParseException e) {
+            deployPortRequiresValue = true;
+        }
+        TestKit.check("deploy's --port (a value option) throws when its value is missing, proving it is not treated as a flag",
+                deployPortRequiresValue);
+
+        boolean statusPortRejectsInlineValue = false;
+        try {
+            buildDeployStatusParser().parse(new String[]{"status", "--port=9090"});
+        } catch (ArgParseException e) {
+            statusPortRejectsInlineValue = true;
+        }
+        TestKit.check("status's --port (a flag) rejects an inline value, proving it is not treated as an option",
+                statusPortRejectsInlineValue);
+    }
+
+    private static void testUnknownSubcommandThrows() {
+        ArgParser parser = buildDeployStatusParser();
+        boolean threw = false;
+        String message = null;
+        try {
+            parser.parse(new String[]{"teleport", "--port=9090"});
+        } catch (ArgParseException e) {
+            threw = true;
+            message = e.getMessage();
+        }
+        TestKit.check("an unrecognized subcommand name throws ArgParseException", threw);
+        TestKit.check("exception message names the unrecognized subcommand", message != null && message.contains("teleport"));
+    }
+
+    private static void testTopLevelParserWithoutSubcommandsIsUnaffected() {
+        ArgParser parser = buildStandardParser();
+        ParsedArgs parsed = parser.parse(new String[]{"deploy", "--verbose"});
+        TestKit.check("a parser with no registered subcommands treats a subcommand-like token as an ordinary positional",
+                parsed.positionals().equals(List.of("deploy")));
+        TestKit.check("flags still parse normally when no subcommands are registered", parsed.flag("verbose"));
+        TestKit.check("subcommandName() is null when no subcommands are registered", parsed.subcommandName() == null);
+        TestKit.check("subcommand() is null when no subcommands are registered", parsed.subcommand() == null);
     }
 }

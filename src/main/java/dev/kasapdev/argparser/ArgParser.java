@@ -1,6 +1,7 @@
 package dev.kasapdev.argparser;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -11,7 +12,8 @@ import java.util.Map;
  *
  * <p>Supports boolean flags ({@code --verbose} / {@code -v}), value-taking options
  * ({@code --output=file.txt} or {@code --output file.txt}, with an optional {@code -o} short
- * alias), positional arguments, and generated {@code --help} text.
+ * alias), positional arguments, generated {@code --help} text, and named subcommands (each
+ * with its own independent flags/options, registered via {@link #subcommand(String)}).
  *
  * <p>An {@code --} token by itself marks the end of options: everything after it is treated
  * as a positional argument, even if it looks like a flag.
@@ -20,6 +22,7 @@ public final class ArgParser {
 
     private final Map<String, OptionSpec> specsByName = new LinkedHashMap<>();
     private final Map<String, String> aliasToName = new HashMap<>();
+    private final Map<String, ArgParser> subcommands = new LinkedHashMap<>();
 
     /** Registers a boolean flag with no short alias, e.g. {@code --verbose}. */
     public ArgParser addFlag(String name, String description) {
@@ -43,6 +46,29 @@ public final class ArgParser {
         return this;
     }
 
+    /**
+     * Registers a subcommand under the given name and returns its own, independent
+     * {@link ArgParser}, configured with the same {@code addFlag}/{@code addOption} builder
+     * methods as the top-level parser.
+     *
+     * <p>When {@link #parse(String[])} is called on the top-level parser and at least one
+     * subcommand is registered, the first element of {@code args} is matched against the
+     * registered subcommand names. On a match, every remaining argument is parsed against
+     * that subcommand's own parser (its flags/options never interact with the top-level
+     * parser's, or with any other subcommand's), and the result is exposed via
+     * {@link ParsedArgs#subcommandName()} and {@link ParsedArgs#subcommand()}.
+     *
+     * @throws IllegalArgumentException if a subcommand with this name is already registered
+     */
+    public ArgParser subcommand(String name) {
+        if (subcommands.containsKey(name)) {
+            throw new IllegalArgumentException("Subcommand already registered: " + name);
+        }
+        ArgParser sub = new ArgParser();
+        subcommands.put(name, sub);
+        return sub;
+    }
+
     private void register(OptionSpec spec) {
         if (specsByName.containsKey(spec.name)) {
             throw new IllegalArgumentException("Option already registered: --" + spec.name);
@@ -59,10 +85,26 @@ public final class ArgParser {
     /**
      * Parses the given command-line arguments against the registered flags and options.
      *
-     * @throws ArgParseException on an unrecognized {@code --flag}/{@code -f}, or an option
-     *                           that is missing its required value
+     * <p>If one or more subcommands are registered (see {@link #subcommand(String)}) and
+     * {@code args} is non-empty, the first element of {@code args} is treated as the
+     * subcommand name rather than as a flag/option/positional of this parser: the remainder
+     * of {@code args} is parsed by that subcommand's own parser instead.
+     *
+     * @throws ArgParseException on an unrecognized {@code --flag}/{@code -f}, an option
+     *                           that is missing its required value, or (when subcommands are
+     *                           registered) an unrecognized subcommand name
      */
     public ParsedArgs parse(String[] args) {
+        if (!subcommands.isEmpty() && args.length > 0) {
+            String invoked = args[0];
+            ArgParser sub = subcommands.get(invoked);
+            if (sub == null) {
+                throw new ArgParseException("Unknown subcommand: " + invoked);
+            }
+            ParsedArgs subResult = sub.parse(Arrays.copyOfRange(args, 1, args.length));
+            return ParsedArgs.forSubcommand(invoked, subResult);
+        }
+
         Map<String, Boolean> flags = new HashMap<>();
         Map<String, String> options = new HashMap<>();
         for (OptionSpec spec : specsByName.values()) {
